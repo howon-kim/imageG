@@ -5,7 +5,7 @@
 
   type ImageInfo = { width: number; height: number; path: string; thumbnail?: string };
   type AreaSel  = { id: number; x: number; y: number; w: number; h: number; avgGV: number | null };
-  let { info, pairInfo = null, selectMode = false }: { info: ImageInfo; pairInfo?: ImageInfo | null; selectMode?: boolean } = $props();
+  let { info, pairInfo = null, selectMode = false, showDiff = true }: { info: ImageInfo; pairInfo?: ImageInfo | null; selectMode?: boolean; showDiff?: boolean } = $props();
 
   let canvas: HTMLCanvasElement;
   let container: HTMLDivElement;
@@ -172,7 +172,7 @@
       canvas.width = cw; canvas.height = ch;
     }
     ctx.imageSmoothingEnabled = zoom < 3;
-    ctx.fillStyle = "#111";
+    ctx.fillStyle = "#0b0b0e";
     ctx.fillRect(0, 0, cw, ch);
 
     if (pairInfo && viewMode === "both") {
@@ -196,7 +196,7 @@
     const gvSnap  = !zooming && zoom >= 16 ? capturePixelGV() : null;
     if (!zooming && zoom >= 6)  drawPixelGrid();
     if (gvSnap)                 drawGVLabels(gvSnap);
-    if (zoom >= 20 && gvSnap)   drawPixelDiffs(gvSnap);
+    if (showDiff && zoom >= 20 && gvSnap) drawPixelDiffs(gvSnap);
     drawSelections();
     if (zoom >= 1)  drawRuler();
     drawMinimap();
@@ -229,7 +229,7 @@
   function drawSplitLine(sy: number, cw: number) {
     // Dashed divider
     ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
     ctx.lineWidth = 1;
     ctx.setLineDash([6, 5]);
     ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(cw, sy);
@@ -388,57 +388,126 @@
       const h = Math.abs(selDraftEnd.y - selDraftStart.y);
       const sx = offsetX + x * zoom, sy = offsetY + y * zoom;
       const sw = w * zoom, sh = h * zoom;
-      ctx.fillStyle = "rgba(80,160,255,0.12)";
+      ctx.fillStyle = "rgba(78,180,255,0.08)";
       ctx.fillRect(sx, sy, sw, sh);
-      ctx.strokeStyle = "rgba(80,160,255,0.85)";
-      ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
-      ctx.strokeRect(sx, sy, sw, sh);
+      ctx.strokeStyle = "rgba(78,180,255,0.7)";
+      ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+      ctx.strokeRect(sx + 0.5, sy + 0.5, sw, sh);
       ctx.setLineDash([]);
-      const lbl = `${Math.round(w)} × ${Math.round(h)}`;
+      const lbl = `${Math.round(w)} × ${Math.round(h)} px`;
       ctx.font = "bold 11px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       const tw = ctx.measureText(lbl).width;
       const lx = sx + sw / 2, ly = sy + sh / 2;
-      ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(lx - tw/2 - 4, ly - 9, tw + 8, 18);
-      ctx.fillStyle = "#80c0ff"; ctx.fillText(lbl, lx, ly);
+      ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(lx - tw/2 - 5, ly - 9, tw + 10, 18);
+      ctx.fillStyle = "#78b8ff"; ctx.fillText(lbl, lx, ly);
     }
 
-    // Confirmed selections
+    const C   = "#50e898";          // accent colour
+    const DIM = 16;                 // px offset from box to dimension line
+    const TK  = 5;                  // extension tick half-length
+    const AH  = 6;                  // arrowhead size
+
+    function arrowHead(tx: number, ty: number, dx: number, dy: number) {
+      const px = -dy, py = dx; // perpendicular
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(tx + dx * AH + px * AH * 0.35, ty + dy * AH + py * AH * 0.35);
+      ctx.lineTo(tx + dx * AH - px * AH * 0.35, ty + dy * AH - py * AH * 0.35);
+      ctx.closePath(); ctx.fill();
+    }
+
+    function dimLabel(text: string, x: number, y: number, rotate: boolean) {
+      ctx.save();
+      ctx.translate(x, y);
+      if (rotate) ctx.rotate(-Math.PI / 2);
+      ctx.font = "bold 10px system-ui";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const tw = ctx.measureText(text).width;
+      ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(-tw/2 - 3, -8, tw + 6, 16);
+      ctx.fillStyle = C; ctx.fillText(text, 0, 0.5);
+      ctx.restore();
+    }
+
     for (let i = 0; i < selections.length; i++) {
       const sel = selections[i];
       const sx = offsetX + sel.x * zoom, sy = offsetY + sel.y * zoom;
-      const sw = sel.w * zoom, sh = sel.h * zoom;
+      const sw = sel.w * zoom,           sh = sel.h * zoom;
+      const cw = canvas.width;
 
-      ctx.fillStyle = "rgba(80,210,120,0.12)";
+      // ── Box ──────────────────────────────────────────────────────────────
+      ctx.fillStyle = "rgba(80,232,152,0.06)";
       ctx.fillRect(sx, sy, sw, sh);
-      ctx.strokeStyle = "rgba(80,210,120,0.9)";
-      ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
-      ctx.strokeRect(sx, sy, sw, sh);
-      ctx.setLineDash([]);
 
-      // Center: avg GV label
-      const lbl = sel.avgGV !== null ? `⌀ ${sel.avgGV.toFixed(1)}` : "…";
-      ctx.font = "bold 12px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      const tw = ctx.measureText(lbl).width;
+      ctx.strokeStyle = C; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+      ctx.strokeRect(sx + 0.5, sy + 0.5, sw, sh);
+
+      // Corner handles
+      const HS = 4;
+      ctx.fillStyle = C;
+      for (const [cx2, cy2] of [[sx,sy],[sx+sw,sy],[sx,sy+sh],[sx+sw,sy+sh]] as [number,number][]) {
+        ctx.fillRect(cx2 - HS, cy2 - HS, HS * 2, HS * 2);
+      }
+
+      // ── Center: avg GV ───────────────────────────────────────────────────
+      const avgLbl = sel.avgGV !== null ? `⌀ ${sel.avgGV.toFixed(1)}` : "…";
       const lx = sx + sw / 2, ly = sy + sh / 2;
-      ctx.fillStyle = "rgba(0,0,0,0.72)"; ctx.fillRect(lx - tw/2 - 5, ly - 10, tw + 10, 20);
-      ctx.fillStyle = "#fff"; ctx.fillText(lbl, lx, ly);
+      ctx.font = "bold 13px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const aw = ctx.measureText(avgLbl).width;
+      ctx.fillStyle = "rgba(0,0,0,0.68)"; ctx.fillRect(lx - aw/2 - 6, ly - 11, aw + 12, 22);
+      ctx.fillStyle = "#fff"; ctx.fillText(avgLbl, lx, ly);
 
-      // Top-left: index badge
-      ctx.font = "bold 10px system-ui"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+      // ── Index badge ──────────────────────────────────────────────────────
+      ctx.font = "bold 9px system-ui"; ctx.textAlign = "left"; ctx.textBaseline = "top";
       const badge = `#${i + 1}`;
       const bw = ctx.measureText(badge).width;
-      ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(sx + 3, sy + 3, bw + 6, 15);
-      ctx.fillStyle = "#80e8a0"; ctx.fillText(badge, sx + 6, sy + 4);
+      ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(sx + 4, sy + 4, bw + 6, 13);
+      ctx.fillStyle = C; ctx.fillText(badge, sx + 7, sy + 5);
 
-      // Top-right: × delete button
-      const hx = Math.min(sx + sw, canvas.width - 4) - 10;
+      // ── × delete ─────────────────────────────────────────────────────────
+      const hx = Math.min(sx + sw, cw - 4) - 10;
       const hy = Math.max(sy, RULER_SIZE + 4) + 10;
       selHits.push({ id: sel.id, cx: hx, cy: hy });
-      ctx.beginPath(); ctx.arc(hx, hy, 8, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(200,55,55,0.88)"; ctx.fill();
+      ctx.beginPath(); ctx.arc(hx, hy, 7, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(220,60,60,0.88)"; ctx.fill();
       ctx.font = "bold 11px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillStyle = "#fff"; ctx.fillText("×", hx, hy + 0.5);
+
+      // ── Dimension arrows ─────────────────────────────────────────────────
+      ctx.strokeStyle = C; ctx.fillStyle = C; ctx.lineWidth = 1;
+
+      // Width arrow — below box
+      const wy  = sy + sh + DIM;
+      const wmx = sx + sw / 2;
+      // Extension lines
+      ctx.beginPath();
+      ctx.moveTo(sx,      sy + sh); ctx.lineTo(sx,      wy + TK);
+      ctx.moveTo(sx + sw, sy + sh); ctx.lineTo(sx + sw, wy + TK);
+      ctx.stroke();
+      // Dimension line
+      ctx.beginPath(); ctx.moveTo(sx, wy); ctx.lineTo(sx + sw, wy); ctx.stroke();
+      // Arrowheads pointing inward
+      arrowHead(sx,      wy, +1,  0);
+      arrowHead(sx + sw, wy, -1,  0);
+      // Label
+      dimLabel(`${sel.w} px`, wmx, wy, false);
+
+      // Height arrow — right of box
+      const hax = sx + sw + DIM;
+      const hmy = sy + sh / 2;
+      // Extension lines
+      ctx.beginPath();
+      ctx.moveTo(sx + sw, sy);      ctx.lineTo(hax + TK, sy);
+      ctx.moveTo(sx + sw, sy + sh); ctx.lineTo(hax + TK, sy + sh);
+      ctx.stroke();
+      // Dimension line
+      ctx.beginPath(); ctx.moveTo(hax, sy); ctx.lineTo(hax, sy + sh); ctx.stroke();
+      // Arrowheads pointing inward
+      arrowHead(hax, sy,      0, +1);
+      arrowHead(hax, sy + sh, 0, -1);
+      // Label (rotated 90°)
+      dimLabel(`${sel.h} px`, hax, hmy, true);
     }
+
     ctx.restore();
   }
 
@@ -475,19 +544,19 @@
     const norm      = rawStep / mag;
     const majorStep = Math.max(1, Math.round(norm < 2 ? mag : norm < 5 ? 2 * mag : 5 * mag));
 
-    ctx.fillStyle = "rgba(28,28,28,0.92)";
+    ctx.fillStyle = "rgba(16,16,18,0.94)";
     ctx.fillRect(RULER_SIZE, 0, cw - RULER_SIZE, RULER_SIZE);
     ctx.fillRect(0, RULER_SIZE, RULER_SIZE, ch - RULER_SIZE);
-    ctx.fillStyle = "#1a1a1a";
+    ctx.fillStyle = "#0e0e10";
     ctx.fillRect(0, 0, RULER_SIZE, RULER_SIZE);
 
-    ctx.strokeStyle = "#444"; ctx.lineWidth = 1;
+    ctx.strokeStyle = "#28283a"; ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(RULER_SIZE, RULER_SIZE); ctx.lineTo(cw, RULER_SIZE);
     ctx.moveTo(RULER_SIZE, RULER_SIZE); ctx.lineTo(RULER_SIZE, ch);
     ctx.stroke();
 
-    ctx.strokeStyle = "#666"; ctx.fillStyle = "#999"; ctx.font = "9px monospace";
+    ctx.strokeStyle = "#38384a"; ctx.fillStyle = "#505068"; ctx.font = "9px monospace";
 
     const x0 = Math.floor(-offsetX / zoom / majorStep) * majorStep;
     const x1 = Math.ceil((cw - offsetX) / zoom / majorStep) * majorStep;
@@ -529,8 +598,8 @@
 
     ctx.save();
     ctx.beginPath(); mmapRoundRect(bx - PAD, by - PAD, mw + PAD * 2, mh + PAD * 2, 5);
-    ctx.fillStyle = "rgba(12,12,12,0.88)"; ctx.fill();
-    ctx.strokeStyle = "#555"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = "rgba(10,10,16,0.88)"; ctx.fill();
+    ctx.strokeStyle = "#2a2a3a"; ctx.lineWidth = 1; ctx.stroke();
     ctx.restore();
 
     ctx.globalAlpha = 0.35;
@@ -739,21 +808,27 @@
   .viewer:active { cursor: grabbing; }
   canvas { display: block; }
   .zoom-badge {
-    position: absolute; bottom: 10px; right: 10px;
-    background: rgba(0,0,0,0.6); color: #fff;
-    padding: 3px 10px; border-radius: 10px; font-size: 13px; font-weight: bold;
+    position: absolute; bottom: 12px; right: 12px;
+    background: rgba(10,10,16,0.78); border: 1px solid rgba(255,255,255,0.06);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    color: #707090; padding: 3px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
     pointer-events: none;
   }
   .view-toggle {
-    position: absolute; bottom: 44px; right: 10px;
-    display: flex; gap: 3px;
+    position: absolute; bottom: 44px; right: 12px;
+    display: flex; gap: 2px;
+    background: rgba(10,10,16,0.78); border: 1px solid rgba(255,255,255,0.06);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-radius: 7px; padding: 3px;
   }
   .view-toggle button {
-    background: rgba(30,30,30,0.82); border: 1px solid #555; color: #ccc;
-    border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 11px;
+    background: transparent; border: 1px solid transparent; color: #555570;
+    border-radius: 5px; padding: 4px 10px; cursor: pointer; font-size: 11px; font-weight: 500;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
   }
-  .view-toggle button:hover { background: rgba(60,60,60,0.9); }
-  .view-toggle button.active { background: rgba(42,90,154,0.9); border-color: #4a8ad4; color: #fff; }
+  .view-toggle button:hover { background: rgba(255,255,255,0.05); color: #8888a8; }
+  .view-toggle button.active { background: rgba(20,40,100,0.9); border-color: rgba(91,142,240,0.45); color: #88aaff; }
   .viewer.select-mode { cursor: crosshair; }
   .viewer.select-mode:active { cursor: crosshair; }
 </style>

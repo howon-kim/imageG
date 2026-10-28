@@ -23,7 +23,39 @@
   let showFiles   = $state(true);
   let loading     = $state(false);
   let error       = $state("");
-  let selectMode  = $state(false);
+  let selectMode   = $state(false);
+  let showDiff     = $state(true);
+  let sidebarWidth = $state(180);
+
+  function startResize(e: MouseEvent) {
+    const startX = e.clientX, startW = sidebarWidth;
+    function onMove(e: MouseEvent) {
+      sidebarWidth = Math.max(120, Math.min(480, startW + e.clientX - startX));
+    }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    e.preventDefault();
+  }
+
+  type SidebarItem = { path: string; origIdx: number; hasPair: boolean };
+
+  function computeSidebarItems(files: string[]): SidebarItem[] {
+    const darkPaths = new Set<string>();
+    const hasPairIdx = new Set<number>();
+    for (let i = 0; i < files.length; i++) {
+      const pair = findPair(files[i], files);
+      if (pair) { darkPaths.add(pair.dark); hasPairIdx.add(i); }
+    }
+    return files
+      .map((f, i) => ({ path: f, origIdx: i, hasPair: hasPairIdx.has(i) }))
+      .filter(item => !darkPaths.has(item.path));
+  }
+
+  let sidebarItems = $derived(computeSidebarItems(fileList));
 
   const DARK_WORDS  = ["dark"];
   const LIGHT_WORDS = ["white"];
@@ -155,6 +187,9 @@
 <div class="app">
   <header class="toolbar">
     <div class="toolbar-left">
+      {#if fileList.length > 0}
+        <button class:active={showFiles} onclick={() => showFiles = !showFiles} title="Toggle sidebar (P)">☰</button>
+      {/if}
       <button onclick={openFile}>Open File</button>
       <button onclick={openFolder}>Open Folder</button>
     </div>
@@ -169,6 +204,7 @@
     </div>
     <div class="toolbar-right">
       {#if imageInfo}
+        <button class:active={showDiff} onclick={() => showDiff = !showDiff} title="Toggle pixel diff heatmap">Diff</button>
         <button class:active={selectMode} onclick={() => selectMode = !selectMode} title="Select Area">Area</button>
         <button onclick={() => bridge.clearSelections()} title="Clear selections">Clear</button>
         <button onclick={() => bridge.zoomOut()} title="Zoom Out (-)">−</button>
@@ -181,8 +217,11 @@
 
   <div class="body">
     {#if showFiles && fileList.length > 0}
-      <aside class="file-panel">
-        <FileList files={fileList} {currentIndex} onselect={(i: number) => { currentIndex = i; loadImage(fileList[i]); }} />
+      <aside class="file-panel" style="width: {sidebarWidth}px">
+        <div class="file-scroll">
+          <FileList items={sidebarItems} {currentIndex} onselect={(origIdx: number) => { currentIndex = origIdx; loadImage(fileList[origIdx]); }} />
+        </div>
+        <div class="resize-handle" role="separator" aria-orientation="vertical" onmousedown={startResize}></div>
       </aside>
     {/if}
 
@@ -192,7 +231,7 @@
       {:else if error}
         <div class="overlay error">{error}</div>
       {:else if imageInfo}
-        <ImageViewer info={imageInfo} pairInfo={pairImageInfo} {selectMode} />
+        <ImageViewer info={imageInfo} pairInfo={pairImageInfo} {selectMode} {showDiff} />
       {:else}
         <div class="overlay hint">
           <p>Open an image file or folder to get started.</p>
@@ -214,32 +253,53 @@
 
 <style>
   :global(*, *::before, *::after) { box-sizing: border-box; margin: 0; padding: 0; }
-  :global(body) { background: #1a1a1a; color: #e0e0e0; font-family: system-ui, sans-serif; font-size: 13px; overflow: hidden; }
+  :global(body) { background: #0e0e10; color: #d0d0e0; font-family: system-ui, sans-serif; font-size: 13px; overflow: hidden; }
 
   .app { display: flex; flex-direction: column; height: 100vh; }
-  .toolbar { display: flex; align-items: center; justify-content: space-between; background: #2a2a2a; border-bottom: 1px solid #3a3a3a; padding: 6px 12px; gap: 8px; flex-shrink: 0; }
-  .toolbar-left, .toolbar-right { display: flex; gap: 6px; }
+  .toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    background: #161618; border-bottom: 1px solid #24242c;
+    padding: 6px 12px; gap: 8px; flex-shrink: 0;
+  }
+  .toolbar-left, .toolbar-right { display: flex; gap: 5px; align-items: center; }
   .toolbar-center { flex: 1; text-align: center; display: flex; gap: 10px; justify-content: center; align-items: center; overflow: hidden; }
-  .image-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
-  .image-size { color: #888; white-space: nowrap; }
-  .nav-info { color: #aaa; background: #333; border-radius: 10px; padding: 1px 8px; font-size: 11px; }
+  .image-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; color: #c0c0d8; }
+  .image-size { color: #585870; white-space: nowrap; font-size: 12px; }
+  .nav-info { color: #707088; background: #1a1a22; border: 1px solid #28283a; border-radius: 10px; padding: 1px 8px; font-size: 11px; }
 
-  button { background: #3a3a3a; border: 1px solid #555; color: #e0e0e0; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
-  button:hover { background: #4a4a4a; }
-  button.active { background: #2a5a9a; border-color: #4a8ad4; }
+  button {
+    background: #1c1c22; border: 1px solid #2e2e3a; color: #9898b4;
+    border-radius: 5px; padding: 4px 10px; cursor: pointer; font-size: 12px;
+    transition: background 0.1s, border-color 0.1s, color 0.1s;
+  }
+  button:hover { background: #242430; border-color: #38384a; color: #c0c0d8; }
+  button.active { background: #142050; border-color: #3460c0; color: #90b4ff; }
 
   .body { display: flex; flex: 1; overflow: hidden; }
-  .file-panel { width: 180px; flex-shrink: 0; background: #232323; border-right: 1px solid #3a3a3a; overflow-y: auto; }
-  .viewer-area { flex: 1; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #111; }
-  .right-panels { width: 220px; flex-shrink: 0; background: #232323; border-left: 1px solid #3a3a3a; overflow-y: auto; }
-  .panel { background: #1e1e1e; }
-  .panel-title { padding: 6px 10px; font-size: 11px; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #333; }
+  .file-panel {
+    position: relative; flex-shrink: 0;
+    background: #101012; border-right: 1px solid #202028;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .file-scroll { flex: 1; overflow-y: auto; }
+  .file-scroll::-webkit-scrollbar { width: 4px; }
+  .file-scroll::-webkit-scrollbar-track { background: transparent; }
+  .file-scroll::-webkit-scrollbar-thumb { background: #28283a; border-radius: 2px; }
+  .resize-handle {
+    position: absolute; right: 0; top: 0; bottom: 0; width: 4px;
+    cursor: col-resize; z-index: 10; background: transparent;
+  }
+  .resize-handle:hover { background: rgba(91,142,240,0.3); }
+  .viewer-area { flex: 1; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #0b0b0e; }
+  .right-panels { width: 220px; flex-shrink: 0; background: #101012; border-left: 1px solid #202028; overflow-y: auto; }
+  .panel { background: #101012; }
+  .panel-title { padding: 6px 10px; font-size: 10px; font-weight: 700; color: #505060; text-transform: uppercase; letter-spacing: 0.8px; border-bottom: 1px solid #1c1c24; }
 
-  .overlay { display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; color: #666; text-align: center; width: 100%; height: 100%; }
-  .overlay.error { color: #e05555; }
-  .hint p { color: #555; }
-  .shortcuts { font-size: 11px; color: #444; }
+  .overlay { display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; color: #383848; text-align: center; width: 100%; height: 100%; }
+  .overlay.error { color: #b04040; }
+  .hint p { color: #363645; }
+  .shortcuts { font-size: 11px; color: #282838; }
 
-  .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid #444; border-top-color: #4a8ad4; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid #24242e; border-top-color: #5b8ef0; border-radius: 50%; animation: spin 0.7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>

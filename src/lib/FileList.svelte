@@ -1,8 +1,9 @@
 <script lang="ts">
-  let { files, currentIndex, onselect }: {
-    files: string[];
+  type SidebarItem = { path: string; origIdx: number; hasPair: boolean };
+  let { items, currentIndex, onselect }: {
+    items: SidebarItem[];
     currentIndex: number;
-    onselect: (i: number) => void;
+    onselect: (origIdx: number) => void;
   } = $props();
 
   function filename(path: string) {
@@ -11,14 +12,17 @@
 </script>
 
 <div class="file-list">
-  {#each files as f, i}
+  {#each items as item}
     <button
       class="file-item"
-      class:active={i === currentIndex}
-      onclick={() => onselect(i)}
-      title={f}
+      class:active={item.origIdx === currentIndex}
+      onclick={() => onselect(item.origIdx)}
+      title={item.path}
     >
-      {filename(f)}
+      {#if item.hasPair}
+        <span class="pair-dot" title="Has paired image"></span>
+      {/if}
+      <span class="name">{filename(item.path)}</span>
     </button>
   {/each}
 </div>
@@ -26,11 +30,20 @@
 <style>
   .file-list { display: flex; flex-direction: column; padding: 4px 0; }
   .file-item {
-    text-align: left; padding: 5px 10px; background: none; border: none;
-    color: #bbb; cursor: pointer; font-size: 12px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    border-radius: 0;
+    display: flex; align-items: center; gap: 6px;
+    text-align: left; padding: 5px 10px 5px 12px;
+    background: none; border: none; border-left: 2px solid transparent;
+    color: #585870; cursor: pointer; font-size: 12px; width: 100%;
+    white-space: nowrap; overflow: hidden;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
   }
-  .file-item:hover { background: #2a2a2a; }
-  .file-item.active { background: #1e3a6a; color: #fff; }
+  .file-item:hover { background: #15151c; color: #9898b0; border-left-color: #282838; }
+  .file-item.active { background: #111128; color: #b8c0f0; border-left-color: #5b8ef0; }
+  .name { overflow: hidden; text-overflow: ellipsis; }
+  .pair-dot {
+    flex-shrink: 0;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #50e898; opacity: 0.6;
+  }
+  .file-item.active .pair-dot { opacity: 1; }
 </style>
